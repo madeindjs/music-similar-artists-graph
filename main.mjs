@@ -13,7 +13,6 @@ import { MusicbrainzService } from "./lib/musicbrainz.mjs";
 
 class MusicArtistGraph {
   static #MUSIC_EXTENSIONS = new Set([".flac", ".mp3", ".ogg"]);
-
   /** @type {Database} */
   #db;
   /** @type {MusicbrainzService} */
@@ -42,6 +41,12 @@ class MusicArtistGraph {
     }
   }
 
+  async fetchSimilarArtists() {
+    for (const artist of await this.#db.getArtists()) {
+      await this.#musicbrainz.fetchSimilarArtists(artist.id, true);
+    }
+  }
+
   async getArtistFromFile(file) {
     const metadata = await parseFile(file).catch(() => undefined);
     if (!metadata) throw Error("Cannot get metadata");
@@ -55,7 +60,7 @@ class MusicArtistGraph {
 
     if (!artistMbid) {
       const artist = await this.#musicbrainz.findArtist(artistName, true);
-      if (artist === undefined) throw Error(`Cannot find artists in Musicbrainz: ${artist}`);
+      if (artist === undefined) throw Error(`Cannot find artists in Musicbrainz: ${artistName}`);
       artistMbid = artist.id ?? "UNKNOWN";
     }
 
@@ -75,6 +80,8 @@ async function main() {
   const service = new MusicArtistGraph(musicbrainz, db);
 
   await service.getArtistsInDirectory("/home/alexandre/Musique/");
+
+  await service.fetchSimilarArtists();
 
   service.close();
 }
