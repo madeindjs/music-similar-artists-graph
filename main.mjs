@@ -16,15 +16,8 @@ class MusicArtistGraph {
 
   /** @type {Database} */
   #db;
-
   /** @type {MusicbrainzService} */
   #musicbrainz;
-  /** @type {Map<string, string>} */
-  #artistsMbidByName = new Map();
-  /** @type {Map<string, number>} */
-  #artistsCount = new Map();
-
-  #files = new Set();
 
   constructor(musicbrainz = new MusicbrainzService(), db = new Database()) {
     this.#musicbrainz = musicbrainz;
@@ -69,27 +62,6 @@ class MusicArtistGraph {
     await this.#db.addArtist(artistName, artistMbid);
   }
 
-  getArtistsSummary() {
-    const result = [];
-
-    for (const [name, count] of this.#artistsCount) {
-      console.log(name);
-      result.push({
-        name,
-        trackCount: count,
-        artistMbid: this.#artistsMbidByName.get(name),
-      });
-    }
-
-    return result;
-  }
-
-  toJSON() {
-    return {
-      files: [...this.#files],
-    };
-  }
-
   async close() {
     await this.#db.close();
   }
@@ -103,8 +75,6 @@ async function main() {
   const service = new MusicArtistGraph(musicbrainz, db);
 
   await service.getArtistsInDirectory("/home/alexandre/Musique/");
-
-  console.log(service.getArtistsSummary());
 
   service.close();
 }
