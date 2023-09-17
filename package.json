@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "music-metadata": "^8.1.4"
+    "music-metadata": "^8.1.4",
+    "sanitize-filename": "^1.6.3"
   }
 }
