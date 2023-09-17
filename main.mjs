@@ -7,8 +7,8 @@ const MUSIC_EXTENSIONS = new Set(['.flac', '.mp3', '.ogg'])
 
 
 async function getArtistCount() {
-  /** @type {Map<string, number>} */
-  const artistCount = new Map();
+  /** @type {Record<string, number>} */
+  const artistCount = {};
 
   for await (const file of walkDir('/home/alexandre/Musique/')) {
     if (!MUSIC_EXTENSIONS.has(extname(file))) continue;
@@ -19,8 +19,8 @@ async function getArtistCount() {
     const artistName = metadata.common.artist ?? metadata.common.artists?.[0]
     if (!artistName) continue
 
-    const count = artistCount.get(artistName) ?? 0
-    artistCount.set(artistName, count + 1)
+    const count = artistCount[artistName] ?? 0
+    artistCount[artistName] = count + 1
   }
 
   return artistCount
