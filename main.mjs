@@ -2,7 +2,7 @@ import { parseFile } from "music-metadata";
 import { extname } from "path";
 import { cacheFunction } from "./lib/cache.mjs";
 import { walkDir } from "./lib/fs-walk.mjs";
-import { findArtist } from "./lib/musicbrainz.mjs";
+import { MusicbrainzService } from "./lib/musicbrainz.mjs";
 
 /**
  * @typedef ArtistInformation
@@ -41,9 +41,8 @@ async function getArtistCount() {
  */
 const getArtistCountWithCache = cacheFunction(getArtistCount);
 
-const findArtistWithCache = cacheFunction(findArtist);
-
 async function main() {
+  const musicbrainz = new MusicbrainzService();
   const artistCount = await getArtistCountWithCache();
 
   /** @type {ArtistInformation[]} */
@@ -55,7 +54,7 @@ async function main() {
   let i = 0;
 
   for (const record of records) {
-    const artist = await findArtistWithCache(record.name);
+    const artist = await musicbrainz.findArtistWithCache(record.name);
     if (!artist) continue;
     record.artistId = artist.id;
   }
