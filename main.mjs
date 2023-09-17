@@ -1,11 +1,15 @@
 import { parseFile } from 'music-metadata';
 import { extname } from 'path';
+import { cacheFunction } from './lib/cache.mjs';
 import { walkDir } from './lib/fs-walk.mjs';
 import { fetchSimilarArtistsByArtistName } from "./lib/musicbrainz.mjs";
 
 const MUSIC_EXTENSIONS = new Set(['.flac', '.mp3', '.ogg'])
 
 
+/**
+ * @returns {Promise<Record<string, number>>}
+ */
 async function getArtistCount() {
   /** @type {Record<string, number>} */
   const artistCount = {};
@@ -26,10 +30,15 @@ async function getArtistCount() {
   return artistCount
 }
 
+/**
+ * @returns {Promise<Record<string, number>>}
+ */
+const getArtistCountWithCache = cacheFunction(getArtistCount)
+
 
 async function main() {
 
-  const artistCount = await getArtistCount()
+  const artistCount = await getArtistCountWithCache()
 
   console.log(artistCount)
   return
