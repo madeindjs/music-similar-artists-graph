@@ -43,7 +43,21 @@ class MusicArtistGraph {
 
   async fetchSimilarArtists() {
     for (const artist of await this.#db.getArtists()) {
-      await this.#musicbrainz.fetchSimilarArtists(artist.id, true);
+      const res = await this.#musicbrainz.fetchSimilarArtists(artist.id, true);
+      if (!res) continue;
+
+      for (const row of res) {
+        try {
+          if (!(await this.#db.hasArtistId(row.artist_mbid))) {
+            await this.#db.addArtist(row.name, row.artist_mbid);
+          }
+        } catch (error) {
+          // TODO
+          console.error(error);
+        }
+
+        await this.#db.addSimilarArtist(artist.id, row.artist_mbid, row.score);
+      }
     }
   }
 
@@ -54,7 +68,7 @@ class MusicArtistGraph {
     const artistName = metadata.common.artist ?? metadata.common.artists?.[0];
     if (!artistName) throw Error("Cannot get artist from metadata");
 
-    if (await this.#db.hasArtist(artistName)) return;
+    if (await this.#db.hasArtistName(artistName)) return;
 
     let artistMbid = metadata.common.musicbrainz_artistid?.[0];
 
@@ -79,7 +93,7 @@ async function main() {
   const musicbrainz = new MusicbrainzService(db);
   const service = new MusicArtistGraph(musicbrainz, db);
 
-  await service.getArtistsInDirectory("/home/alexandre/Musique/");
+  // await service.getArtistsInDirectory("/home/alexandre/Musique/");
 
   await service.fetchSimilarArtists();
 
