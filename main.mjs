@@ -68,7 +68,11 @@ class MusicArtistGraph {
     const artistName = metadata.common.artist ?? metadata.common.artists?.[0];
     if (!artistName) throw Error("Cannot get artist from metadata");
 
-    if (await this.#db.hasArtistName(artistName)) return;
+    const existingArtist = await this.#db.hasArtistName(artistName);
+
+    if (existingArtist) {
+      await this.#db.addTrack(file, existingArtist.id);
+    }
 
     let artistMbid = metadata.common.musicbrainz_artistid?.[0];
 
@@ -78,6 +82,7 @@ class MusicArtistGraph {
       artistMbid = artist.id ?? "UNKNOWN";
     }
 
+    await this.#db.addTrack(file, artistMbid);
     await this.#db.addArtist(artistName, artistMbid);
   }
 
@@ -93,9 +98,9 @@ async function main() {
   const musicbrainz = new MusicbrainzService(db);
   const service = new MusicArtistGraph(musicbrainz, db);
 
-  // await service.getArtistsInDirectory("/home/alexandre/Musique/");
+  await service.getArtistsInDirectory("/home/alexandre/Musique/");
 
-  await service.fetchSimilarArtists();
+  // await service.fetchSimilarArtists();
 
   service.close();
 }
