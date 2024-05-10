@@ -2,15 +2,17 @@
 import { SingleBar } from "cli-progress";
 import { createOption, program } from "commander";
 import { search } from "music-metadata-search";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { cwd } from "node:process";
 import { getCache } from "./lib/cache.mjs";
 import { MusicbrainzService } from "./lib/musicbrainz.mjs";
 
 import graphology from "graphology";
-import { circular } from "graphology-layout";
+import { random } from "graphology-layout";
 import forceLayout from "graphology-layout-force";
-import { renderGraph2 } from "./lib/graph.mjs";
+import noverlap from "graphology-layout-noverlap";
+import { fileURLToPath } from "node:url";
+import { serveFrontend } from "./lib/bundle.mjs";
 
 const packageJson = JSON.parse(await readFile(new URL("./package.json", import.meta.url), { encoding: "utf-8" }));
 
@@ -22,13 +24,6 @@ ttlOption.defaultValueDescription = "1 hour";
 
 const extensionsListOption = createOption("--ext [ext...]", "Extensions of Audio files to scan");
 extensionsListOption.defaultValue = [".mp3", ".flac", ".m4a", ".ogg", ".aac"];
-
-const formatOption = createOption("-f, --format [format]", "Output format")
-  .choices(["txt", "json", "m3u"])
-  .default("txt");
-
-const rangeDescription =
-  "If a single value is provided, it will filter by `=`, you can also give a range like `1..10 to filter using `BETWEEN` operator";
 
 program.argument("[path]", "The directory of local files", cwd()).action(async (path, opts) => {
   console.log("Parsing tracks");
@@ -47,21 +42,21 @@ program.argument("[path]", "The directory of local files", cwd()).action(async (
     }
   }
 
-  const nodeOptions = { size: 100, type: "circle", forceLabel: true };
+  const nodeOptions = { type: "circle", size: 10 };
 
   if (true) {
     console.log("Fetching Musicbrainz artists");
     const bar = new SingleBar({});
     bar.start(artistsCount.size, 0);
 
-    for (const musicbrainzArtistId of artistsCount.keys()) {
+    for (const [musicbrainzArtistId, count] of artistsCount.entries()) {
       try {
         const artist = await service.findArtist(musicbrainzArtistId, true);
         if (!artist) {
           artistsCount.delete(musicbrainzArtistId);
           continue;
         }
-        graph.addNode(musicbrainzArtistId, { ...nodeOptions, label: artist.name });
+        graph.addNode(musicbrainzArtistId, { ...nodeOptions, label: artist.name, color: "green" });
       } catch (error) {
         console.error(`Could not fetch artist ${musicbrainzArtistId}`, error);
         artistsCount.delete(musicbrainzArtistId);
@@ -73,7 +68,7 @@ program.argument("[path]", "The directory of local files", cwd()).action(async (
     bar.stop();
   }
 
-  if (false) {
+  {
     console.log("Fetching Similar artists");
     const bar = new SingleBar({});
     bar.start(graph.nodes().length, 0);
@@ -82,7 +77,7 @@ program.argument("[path]", "The directory of local files", cwd()).action(async (
       try {
         const similarArtists = await service.fetchSimilarArtists(musicbrainzArtistId, true);
 
-        for (const artist of similarArtists.filter((s) => s.score > 98)) {
+        for (const artist of similarArtists.filter((s) => s.score > 5_000)) {
           if (!graph.hasNode(artist.artist_mbid)) {
             graph.addNode(artist.artist_mbid, { ...nodeOptions, label: artist.name });
           }
@@ -101,17 +96,14 @@ program.argument("[path]", "The directory of local files", cwd()).action(async (
   }
 
   console.log("Computing layout");
-  circular.assign(graph, { scale: 1 });
-  forceLayout.assign(graph, { maxIterations: 5 });
+  //circular.assign(graph, { scale: 1 });
+  random.assign(graph, { rng: () => Math.random() * 1000 });
+  forceLayout.assign(graph, { maxIterations: 200, settings: { repulsion: 1 } });
+  if (false) noverlap.assign(graph, {});
 
-  graph.forEachNode((n, attr) => console.log(n, attr));
+  await writeFile(fileURLToPath(new URL("./frontend/graph.json", import.meta.url)), JSON.stringify(graph.toJSON()));
 
-  console.log(graph.export());
-
-  console.log("Rendering graph");
-  // const file = await renderGraph(graph);
-  const file2 = await renderGraph2(graph);
-  console.log(file2);
+  await serveFrontend();
 });
 
 program.showHelpAfterError(true);
