@@ -1,108 +1,111 @@
-import { parseFile } from "music-metadata";
-import { extname } from "path";
-import { Database } from "./lib/database.mjs";
-import { walkDir } from "./lib/fs-walk.mjs";
+#!/usr/bin/env node
+import { SingleBar } from "cli-progress";
+import { createOption, program } from "commander";
+import { search } from "music-metadata-search";
+import { readFile, writeFile } from "node:fs/promises";
+import { cwd } from "node:process";
+import { getCache } from "./lib/cache.mjs";
 import { MusicbrainzService } from "./lib/musicbrainz.mjs";
 
-/**
- * @typedef ArtistInformation
- * @property {?string} [id]
- * @property {string} name
- * @property {string} [artistId]
- */
+import graphology from "graphology";
+import { random } from "graphology-layout";
+import forceLayout from "graphology-layout-force";
+import noverlap from "graphology-layout-noverlap";
+import { fileURLToPath } from "node:url";
+import { serveFrontend } from "./lib/bundle.mjs";
 
-class MusicArtistGraph {
-  static #MUSIC_EXTENSIONS = new Set([".flac", ".mp3", ".ogg"]);
-  /** @type {Database} */
-  #db;
-  /** @type {MusicbrainzService} */
-  #musicbrainz;
+const packageJson = JSON.parse(await readFile(new URL("./package.json", import.meta.url), { encoding: "utf-8" }));
 
-  constructor(musicbrainz = new MusicbrainzService(), db = new Database()) {
-    this.#musicbrainz = musicbrainz;
-    this.#db = db;
+program.name(packageJson.name).description(packageJson.description).version(packageJson.version);
+
+const ttlOption = createOption("--cache-scan-ttl [cacheScanTtl]", "time to live for the cache (in seconds)");
+ttlOption.defaultValue = 3_600;
+ttlOption.defaultValueDescription = "1 hour";
+
+const extensionsListOption = createOption("--ext [ext...]", "Extensions of Audio files to scan");
+extensionsListOption.defaultValue = [".mp3", ".flac", ".m4a", ".ogg", ".aac"];
+
+program.argument("[path]", "The directory of local files", cwd()).action(async (path, opts) => {
+  console.log("Parsing tracks");
+  const tracks = await search(path, { where: '"musicbrainzArtistId" IS NOT NULL' });
+
+  const cache = getCache();
+  const service = new MusicbrainzService(cache);
+
+  const artistsCount = new Map();
+
+  const graph = new graphology({ multi: true, type: "directed" });
+
+  for (const track of tracks) {
+    for (const musicbrainzArtistId of track.musicbrainzArtistId?.split(",") ?? []) {
+      artistsCount.set(musicbrainzArtistId, (artistsCount.get(musicbrainzArtistId) ?? 0) + 1);
+    }
   }
 
-  /**
-   * Walk in the directory and get artist.
-   * @param {string} directory
-   */
-  async getArtistsInDirectory(directory) {
-    for await (const file of walkDir(directory)) {
-      if (!MusicArtistGraph.#MUSIC_EXTENSIONS.has(extname(file))) continue;
-      if (await this.#db.hasTrack(file)) continue;
+  const nodeOptions = { type: "circle", size: 10 };
 
+  if (true) {
+    console.log("Fetching Musicbrainz artists");
+    const bar = new SingleBar({});
+    bar.start(artistsCount.size, 0);
+
+    for (const [musicbrainzArtistId, count] of artistsCount.entries()) {
       try {
-        await this.getArtistFromFile(file);
-      } catch (error) {
-        console.error(error);
-        continue;
-      }
-    }
-  }
-
-  async fetchSimilarArtists() {
-    for (const artist of await this.#db.getArtists()) {
-      const res = await this.#musicbrainz.fetchSimilarArtists(artist.id, true);
-      if (!res) continue;
-
-      for (const row of res) {
-        try {
-          if (!(await this.#db.hasArtistId(row.artist_mbid))) {
-            await this.#db.addArtist(row.name, row.artist_mbid);
-          }
-        } catch (error) {
-          // TODO
-          console.error(error);
+        const artist = await service.findArtist(musicbrainzArtistId, true);
+        if (!artist) {
+          artistsCount.delete(musicbrainzArtistId);
+          continue;
         }
-
-        await this.#db.addSimilarArtist(artist.id, row.artist_mbid, row.score);
+        graph.addNode(musicbrainzArtistId, { ...nodeOptions, label: artist.name, color: "green" });
+      } catch (error) {
+        console.error(`Could not fetch artist ${musicbrainzArtistId}`, error);
+        artistsCount.delete(musicbrainzArtistId);
+      } finally {
+        bar.increment();
       }
     }
+
+    bar.stop();
   }
 
-  async getArtistFromFile(file) {
-    const metadata = await parseFile(file).catch(() => undefined);
-    if (!metadata) throw Error("Cannot get metadata");
+  {
+    console.log("Fetching Similar artists");
+    const bar = new SingleBar({});
+    bar.start(graph.nodes().length, 0);
 
-    const artistName = metadata.common.artist ?? metadata.common.artists?.[0];
-    if (!artistName) throw Error("Cannot get artist from metadata");
+    for (const musicbrainzArtistId of artistsCount.keys()) {
+      try {
+        const similarArtists = await service.fetchSimilarArtists(musicbrainzArtistId, true);
 
-    const existingArtist = await this.#db.hasArtistName(artistName);
+        for (const artist of similarArtists.filter((s) => s.score > 5_000)) {
+          if (!graph.hasNode(artist.artist_mbid)) {
+            graph.addNode(artist.artist_mbid, { ...nodeOptions, label: artist.name });
+          }
 
-    if (existingArtist) {
-      await this.#db.addTrack(file, existingArtist.id);
+          graph.addDirectedEdge(musicbrainzArtistId, artist.artist_mbid);
+        }
+      } catch (error) {
+        console.error(`Could not fetch artist ${musicbrainzArtistId}`, error);
+        artistsCount.delete(musicbrainzArtistId);
+      } finally {
+        bar.increment();
+      }
     }
 
-    let artistMbid = metadata.common.musicbrainz_artistid?.[0];
-
-    if (!artistMbid) {
-      const artist = await this.#musicbrainz.findArtist(artistName, true);
-      if (artist === undefined) throw Error(`Cannot find artists in Musicbrainz: ${artistName}`);
-      artistMbid = artist.id ?? "UNKNOWN";
-    }
-
-    await this.#db.addTrack(file, artistMbid);
-    await this.#db.addArtist(artistName, artistMbid);
+    bar.stop();
   }
 
-  async close() {
-    await this.#db.close();
-  }
-}
+  console.log("Computing layout");
+  //circular.assign(graph, { scale: 1 });
+  random.assign(graph, { rng: () => Math.random() * 1000 });
+  forceLayout.assign(graph, { maxIterations: 200, settings: { repulsion: 1 } });
+  if (false) noverlap.assign(graph, {});
 
-// const getArtistCountWithCache = cacheFunction(getArtistCount);
+  await writeFile(fileURLToPath(new URL("./frontend/graph.json", import.meta.url)), JSON.stringify(graph.toJSON()));
 
-async function main() {
-  const db = new Database();
-  const musicbrainz = new MusicbrainzService(db);
-  const service = new MusicArtistGraph(musicbrainz, db);
+  await serveFrontend();
+});
 
-  await service.getArtistsInDirectory("/home/alexandre/Musique/");
+program.showHelpAfterError(true);
 
-  // await service.fetchSimilarArtists();
-
-  service.close();
-}
-
-main().catch(console.error);
+program.parse();
