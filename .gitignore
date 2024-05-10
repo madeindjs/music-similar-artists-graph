@@ -2,3 +2,4 @@ node_modules
 *.sqlite
 frontend/dist
 frontend/graph.json
+.cache

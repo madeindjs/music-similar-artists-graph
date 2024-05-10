@@ -1,6 +1,6 @@
 {
-  "name": "music-similar-graph",
-  "version": "2.0.0",
+  "name": "music-similar-artists-network-graph",
+  "version": "1.0.0",
   "description": "",
   "main": "main.js",
   "type": "module",
